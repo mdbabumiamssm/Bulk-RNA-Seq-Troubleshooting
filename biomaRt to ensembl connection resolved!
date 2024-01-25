@@ -1,0 +1,71 @@
+Resolving the biomaRt connecting issues with ensembl server! 
+
+MD BABU MIA, PHD 
+
+
+
+Youtube tutorial: https://youtu.be/yly1q8LTtdA
+
+
+
+Abstract 
+
+BioMart, a powerful query-oriented data mining system, is widely used for biological data analysis. However, researchers often encounter connectivity issues due to server overloads or regional restrictions. We address a common error where the BioMart R package fails to connect with the Ensembl database, presenting a practical solution implemented in RStudio for bulk RNA-seq analysis. 
+
+ 
+
+Introduction 
+
+Bulk RNA sequencing (RNA-seq) is a high-throughput approach to investigate the presence and quantity of RNA in a biological sample at a given moment, providing valuable insights into the transcriptomic landscape. Data analysis is often facilitated by BioMart (1-3), which allows users to connect their ensembl ID to the ensembl server to retrieve gene name from the Ensembl database (2). Nonetheless, server accessibility problems can impede the data retrieval process, affecting the workflow efficiency. 
+
+ 
+
+Methods 
+
+The encountered error indicated a redirection to the Ensembl service status page, suggesting the service was unavailable. Ensembl has regional mirrors to distribute the load: the UK (Sanger Institute), US East (Amazon AWS), and Asia (Amazon AWS). The solution involved specifying the regional mirror closest to the user to connect to the BioMart database. 
+
+ 
+
+Results 
+
+The addition of the host parameter within the useMart function in the R code established a direct connection to the appropriate regional Ensembl mirror (http://useast.ensembl.org/info/about/mirrors.html). The R code snippet for this solution is as follows: 
+
+ 
+
+```r 
+
+library(biomaRt) 
+
+ 
+
+# Connect to the US East (Amazon AWS) Ensembl mirror 
+
+ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl", host = "https://useast.ensembl.org") 
+
+``` 
+
+ 
+
+Applying this modification allowed for uninterrupted access to the Ensembl database, enabling the continuation of the bulk RNA-seq analysis without any further connectivity issues. 
+
+ 
+
+Discussion 
+
+The connectivity problem is primarily attributed to recent update, server unavailability due to maintenance or regional restrictions imposed to manage server load. By redirecting the query to a region-specific mirror, the service continuity is maintained. The use of regional mirrors is a common practice in distributed web services to balance the load and provide faster access to users based on their geographic location. 
+
+ 
+
+Conclusion 
+
+I demonstrated a simple yet effective solution to a common connectivity issue encountered while accessing the Ensembl database through the BioMart R package. By specifying a regional mirror in the R code, researchers can circumvent the server load issues and ensure seamless data access for their bulk RNA-seq analyses. 
+
+ 
+
+References 
+
+1. Smedley, D., Haider, S., Durinck, S., Pandini, L., Provero, P., Allen, J., Arnaiz, O., Awedh, M.H., Baldock, R., Barbiera, G. and Bardou, P., 2015. The BioMart community portal: an innovative alternative to large, centralized data repositories. Nucleic acids research, 43(W1), pp.W589-W598. 
+
+2. Yates, A., Akanni, W., Amode, M.R., Barrell, D., Billis, K., Carvalho-Silva, D., Cummins, C., Clapham, P., Fitzgerald, S., Gil, L. and Girón, C.G., 2016. Ensembl 2016. Nucleic acids research, 44(D1), pp.D710-D716. 
+
+3. Durinck, S., Spellman, P.T., Birney, E. and Huber, W., 2009. Mapping identifiers for the integration of genomic datasets with the R/Bioconductor package biomaRt. Nature protocols, 4(8), pp.1184-1191. 
