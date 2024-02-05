@@ -1,0 +1,715 @@
+# Set working directory
+setwd("/home/drdx/MYELOPROLIFERATIVE NEOPLASM/Min Lu/bulk rna seq/Group1NDvsMFsus")
+
+# Load required libraries
+library(DESeq2)
+library(AnnotationDbi)
+library(org.Hs.eg.db)
+library(umap)
+library(ggplot2)
+library(gplots)
+library(RColorBrewer)
+library(VennDiagram)
+library(fgsea)
+library(rtracklayer)
+
+# Read metadata
+sample_info <- read.csv("group1metadata.csv", row.names=1)
+print(head(sample_info))
+
+# Read count files
+file_list <- list.files(pattern="*.txt")
+count_list <- lapply(file_list, function(x) as.matrix(read.table(x, row.names=1, sep="\t")))
+all_counts <- do.call(cbind, count_list)
+print(head(all_counts))
+
+# Pre-filtering
+keep <- rowSums(all_counts >= 0) >= min(table(sample_info$Condition))
+counts_filtered <- all_counts[keep,]
+print(dim(counts_filtered))
+
+# Define path to the downloaded GTF file
+gtf_file_path <- "/home/drdx/Bioinformatics/bulk RNA seq/Homo_sapiens.GRCh38.111.gtf.gz"
+
+# Function to read GTF file and create a mapping of Ensembl IDs to gene symbols
+read_gtf_and_map_genes <- function(gtf_path) {
+  # Import GTF file using rtracklayer
+  gtf_data <- import(gtf_path)
+  
+  # Extract gene annotations and create a data frame
+  genes <- subset(gtf_data, type == "gene")
+  
+  # Create a data frame with Ensembl gene IDs and corresponding gene symbols
+  gene_info <- data.frame(
+    gene_id = sapply(mcols(genes)$gene_id, function(x) strsplit(x, "\\..*")[[1]][1]),
+    gene_symbol = mcols(genes)$gene_name,
+    stringsAsFactors = FALSE
+  )
+  
+  # Create a named vector for easy lookup
+  gene_id_to_symbol <- setNames(gene_info$gene_symbol, gene_info$gene_id)
+  
+  return(gene_id_to_symbol)
+}
+
+# Call the function and store the result
+gene_id_to_symbol <- read_gtf_and_map_genes(gtf_file_path)
+
+# Map Ensembl IDs to Gene Symbols in counts_filtered
+rownames(counts_filtered) <- gene_id_to_symbol[rownames(counts_filtered)]
+
+# Replace NA values with "NA_GENE"
+na_indices <- which(is.na(rownames(counts_filtered)))
+rownames(counts_filtered)[na_indices] <- "NA_GENE"
+
+# Proceed with the rest of your analysis...
+
+
+# DESeq2 analysis 
+
+colnames(counts_filtered) <- rownames(sample_info) 
+
+dds <- DESeqDataSetFromMatrix(countData = counts_filtered, colData = sample_info, design = ~ Condition) 
+
+dds <- DESeq(dds, test="Wald") 
+
+res <- results(dds, contrast=c("Condition","TREATED", "CONTROL")) 
+
+
+
+# Multiple testing correction is done here with FDR at 5% by default 
+
+res_adj <- results(dds, contrast=c("Condition", "TREATED", "CONTROL"), alpha=0.05) 
+
+deg <- subset(res, abs(log2FoldChange) > 1 & padj < 0.05 ) 
+
+
+
+
+
+# Directory to save DEGs and plots 
+
+save_dir <- "/home/drdx/MYELOPROLIFERATIVE NEOPLASM/Min Lu/bulk rna seq/Group1NDvsMFsus/trail v2/" 
+
+# Saving and plotting 
+
+write.csv(as.data.frame(res), file = paste0(save_dir, "1DESeq2_Results.csv")) 
+
+write.csv(as.data.frame(deg), file = paste0(save_dir, "1DESeq2_DEGs.csv")) 
+
+
+
+
+
+#MA plot- We need to add 
+
+pdf(file = paste0(save_dir, "1_MA_Plot.pdf")) 
+
+plotMA(res, ylim=c(-10,10)) 
+
+dev.off() 
+
+# View in RStudio 
+
+plotMA(res, ylim=c(-10,10)) 
+
+
+
+
+
+
+
+# Create a new column in res_df to specify "Upregulated" or "Downregulated" 
+
+# Convert the DESeq2 result object to a data frame 
+
+res_df <- as.data.frame(res) 
+
+res_df$Regulation <- ifelse(res_df$padj < 0.05 & res_df$log2FoldChange >= 1, "Upregulated", 
+                            
+                            ifelse(res_df$padj < 0.05 & res_df$log2FoldChange <= -1, "Downregulated", "Not Significant")) 
+
+
+
+
+
+# Volcano Plot using ggplot2 
+
+volcano_plot <- ggplot(res_df, aes(x=log2FoldChange, y=-log10(padj))) + 
+  
+  geom_point(aes(color=Regulation), alpha=0.4) + 
+  
+  xlim(c(-10, 10)) +  # Same as in MA plot 
+  
+  ylim(c(0, 10)) + 
+  
+  scale_color_manual(values=c("red", "grey", "blue")) + 
+  
+  theme_minimal() + 
+  
+  labs(title="Volcano Plot", 
+       
+       x="log2 Fold Change", 
+       
+       y="-log10(padj)") + 
+  
+  theme(legend.title=element_text("Regulation"), legend.position="bottom") 
+
+
+
+
+
+
+
+# Save the Volcano Plot as PDF 
+
+jpeg(filename = paste0(save_dir, "1_Volcano_Plot.jpg")) 
+
+print(volcano_plot) 
+
+dev.off() 
+
+
+
+# View in RStudio 
+
+print(volcano_plot) 
+
+
+
+
+
+# Dispersion Plot 
+
+# Create and Save the Dispersion Plot as PDF 
+
+pdf(file = paste0(save_dir, "1_Dispersion_Plot.pdf")) 
+
+plotDispEsts(dds, main="Dispersion Estimates") 
+
+dev.off() 
+
+# View in RStudio 
+
+plotDispEsts(dds, main="Dispersion Estimates") 
+
+
+
+
+
+# Rename samples 
+
+sample_info$Sample <- gsub(".+([A-Z])([0-9]+).*", "\\1\\2", rownames(sample_info)) 
+
+# Truncate sample names to first 10 characters 
+
+truncated_sample_names <- substr(rownames(sample_info), 1, 6) 
+
+
+
+
+
+# Boxplot with truncated sample names 
+
+pdf(file = paste0(save_dir, "1_Boxplot.pdf")) 
+
+boxplot(counts(dds, normalized=TRUE), las=2, names=truncated_sample_names) 
+
+dev.off() 
+
+boxplot(counts(dds, normalized=TRUE), las=2, names=truncated_sample_names) 
+
+
+
+# Use rlog transformed counts 
+
+rld <- rlog(dds) 
+
+
+
+#Dendogram-1 Most varying genes top 50 genes 
+
+select <- order(rowVars(assay(rld)), decreasing = TRUE)[1:50] 
+
+df <- assay(rld)[select,] 
+
+pdf(file = paste0(save_dir, "1_Dendrogram1.pdf")) 
+
+heatmap.2(df, dendrogram="row", margins=c(5,10), labCol=truncated_sample_names) 
+
+dev.off() 
+
+
+
+heatmap.2(df, dendrogram="row", margins=c(5,10), labCol=truncated_sample_names) 
+
+# Dendogram-2 Get top 10 DEGs 
+
+# Extract top 10 upregulated genes 
+
+top10_up <- head(deg[order(-deg$log2FoldChange), ], 10) 
+
+
+
+# Get matching row numbers in assay(rld) 
+
+gene_match <- match(rownames(top10_up), rownames(dds))  
+
+
+
+# Extract expression for top 10 
+
+df_top10 <- assay(rld)[gene_match, ] 
+
+print(df_top10) 
+
+# Generate heatmap  
+
+pdf(file = paste0(save_dir, "1_Dendrogram2.pdf")) 
+
+heatmap.2(df_top10, dendrogram="row", margins=c(5,10), labCol=truncated_sample_names) 
+
+dev.off() 
+
+heatmap.2(df_top10, dendrogram="row", margins=c(5,10), labCol=truncated_sample_names) 
+
+
+
+# UMAP 
+
+# Remove duplicate rows if any 
+
+unique_data <- unique(assay(dds)) 
+
+# Transpose the data to have samples as rows and genes as columns 
+
+umap_data = t(unique_data) 
+
+# Run UMAP 
+
+# You can change n_neighbors and random_state based on your specific needs 
+
+umap_obj <- umap(umap_data, n_neighbors = 4, random_state = 123) 
+
+# Plot UMAP 
+
+# Assuming 'Condition' is your grouping variable and it's in 'sample_info' 
+
+# Convert Condition to a factor for color mapping 
+
+col_factor <- as.factor(sample_info$Condition) 
+
+colors <- rainbow(length(unique(col_factor))) 
+
+# Create the plot 
+
+pdf(file = paste0(save_dir, "1_UMAP_Plot.pdf")) 
+
+plot(umap_obj$layout, main="UMAP plot, nbrs=4", xlab="", ylab="", col=colors[col_factor], pch=10, cex=1) 
+
+legend("topright", inset=c(-0,0), legend=unique(col_factor), pch=20, col=colors, title="Condition", pt.cex=2, cex=) 
+
+dev.off() 
+
+plot(umap_obj$layout, main="UMAP plot, nbrs=4", xlab="", ylab="", col=colors[col_factor], pch=10, cex=1) 
+
+legend("topright", inset=c(-0,0), legend=unique(col_factor), pch=20, col=colors, title="Condition", pt.cex=2, cex=) 
+
+
+
+
+
+
+
+# Run PCA on the rlog-transformed data 
+
+pcaData <- plotPCA(rld, intgroup=c("Condition"), returnData=TRUE) 
+
+save_pca_plot <- function(pcaData, save_dir) { 
+  
+  pca_plot <- ggplot(pcaData, aes(x=PC1, y=PC2, color=Condition)) + 
+    
+    geom_point(size=3) + 
+    
+    xlab(paste0("PC1: ", round(100 * attr(pcaData, "percentVar")[1], 2), "% variance")) + 
+    
+    ylab(paste0("PC2: ", round(100 * attr(pcaData, "percentVar")[2], 2), "% variance")) + 
+    
+    ggtitle("PCA Plot") + 
+    
+    theme_minimal() 
+  
+  
+  
+  # Save the PCA plot as PDF 
+  
+  pdf(file = paste0(save_dir, "1_PCA_Plot.pdf")) 
+  
+  print(pca_plot) 
+  
+  dev.off() 
+  
+  # View in RStudio 
+  
+  print(pca_plot) 
+  
+} 
+
+
+
+# Run PCA on the rlog-transformed data 
+
+pcaData <- plotPCA(rld, intgroup=c("Condition"), returnData=TRUE) 
+
+# Save and view PCA plot 
+
+save_pca_plot(pcaData, save_dir) 
+
+
+
+
+
+
+
+# Genes to be highlighted 
+
+highlight_genes <- c("MDM2", "BRD4", "LIN28B", "HIF1A", "NFKB1", "TP53",  
+                     
+                     "HMGA2", "TNFSF10", "TNFRSF10A", "TNFRSF10B",  
+                     
+                     "CDKN1A", "BBC3", "BAX", "VEGFA", "CXCL8", "CXCL2",  
+                     
+                     "PPM1D", "TGFB1", "PMAIP1", "MAPK14") 
+
+
+
+# Get top 10 upregulated genes from DEGs 
+
+top10_up <- head(deg[order(-deg$log2FoldChange), ], 10) 
+
+top10_down <- head(deg[order(deg$log2FoldChange), ], 10) 
+
+
+
+# Combine the genes to be highlighted 
+
+combined_highlight_genes <- unique(c(rownames(top10_up), rownames(top10_down), highlight_genes)) 
+
+
+
+# Annotated Volcano Plot with Highlighted Genes 
+
+highlighted_volcano_plot <- ggplot(res_df, aes(x=log2FoldChange, y=-log10(padj))) + 
+  
+  geom_point(aes(color=Regulation), alpha=0.4) + 
+  
+  geom_text(data=subset(res_df, rownames(res_df) %in% combined_highlight_genes),  
+            
+            aes(label=rownames(subset(res_df, rownames(res_df) %in% combined_highlight_genes))),  
+            
+            vjust=-1, hjust=0.5, size=3, angle=45, color="black") + 
+  
+  xlim(c(-10, 10)) +   
+  
+  ylim(c(0, 10)) + 
+  
+  scale_color_manual(values=c("red", "grey", "blue")) + 
+  
+  theme_minimal() + 
+  
+  labs(title="Annotated Volcano Plot", 
+       
+       x="log2 Fold Change", 
+       
+       y="-log10(padj)") + 
+  
+  theme(legend.title=element_text("Regulation"), legend.position="bottom") 
+
+
+
+# Save the Annotated Volcano Plot as JPEG 
+
+jpeg(filename = paste0(save_dir, "1.2_Annotated_Volcano_Plot.jpg")) 
+
+print(highlighted_volcano_plot)   
+
+dev.off() 
+
+
+
+# View in RStudio 
+
+print(highlighted_volcano_plot) 
+
+
+
+
+
+
+
+
+
+####Enrichment score , should take only top 10 up regulated and down regualted eith highest NES score. 
+
+
+
+# Path to the GMT file 
+
+gmt_file_path <- "/home/drdx/R/required/h.all.v2023.2.Hs.symbols.gmt" 
+
+gene_sets <- fgsea::gmtPathways(gmt_file_path) 
+
+
+
+# Assuming 'res' is a DESeq2 results dataframe with gene names as row names 
+
+# Prepare the ranked list of genes 
+
+ranked_genes <- res$log2FoldChange 
+
+names(ranked_genes) <- row.names(res) 
+
+
+
+# Filter out non-finite values from ranked_genes 
+
+finite_genes <- ranked_genes[is.finite(ranked_genes)] 
+
+
+
+# Run GSEA using fgseaMultilevel 
+
+fgsea_results <- fgsea::fgseaMultilevel(pathways = gene_sets,  
+                                        
+                                        stats = finite_genes,  
+                                        
+                                        minSize = 15,  
+                                        
+                                        maxSize = 500) 
+
+
+
+# View the results 
+
+head(fgsea_results) 
+
+
+
+# Sort the results by NES to get both ends of the spectrum 
+
+sorted_fgsea_results <- fgsea_results[order(fgsea_results$NES), ] 
+
+
+
+# Get the top 20 positively and negatively enriched pathways 
+
+top_positively_enriched <- tail(sorted_fgsea_results, 20) 
+
+top_negatively_enriched <- head(sorted_fgsea_results, 20) 
+
+
+
+# Combine the two sets 
+
+top_enriched_pathways <- rbind(top_negatively_enriched, top_positively_enriched) 
+
+
+
+# Order pathways by NES for plotting 
+
+top_enriched_pathways <- top_enriched_pathways[order(-top_enriched_pathways$NES), ] 
+
+
+
+# Create the enrichment score plot 
+
+enrichment_score_plot <- ggplot(top_enriched_pathways, aes(x=reorder(pathway, NES), y=NES)) + 
+  
+  geom_col(aes(fill=padj < 0.05)) + 
+  
+  coord_flip() + # Flip coordinates for horizontal layout 
+  
+  labs(x="Pathway", y="Normalized Enrichment Score (NES)", fill="Significant") + 
+  
+  theme_minimal() + 
+  
+  theme(legend.position="bottom") 
+
+
+
+# Save the plot as a file 
+
+ggsave(filename = paste0(save_dir, "Top_Enriched_Hallmark_Pathways.pdf"), plot = enrichment_score_plot, width = 8, height = 6) 
+
+
+
+# Print out the plot to the RStudio Viewer 
+
+print(enrichment_score_plot) 
+
+
+
+#This is for pathway specific genes top 40 
+
+
+
+#Top 40 genes per pathway 
+
+# Path to the GMT file 
+
+gmt_file_path <- "/home/drdx/R/required/h.all.v2023.2.Hs.symbols.gmt" 
+
+
+
+# Load the gene sets from the .gmt file 
+
+gene_sets <- fgsea::gmtPathways(gmt_file_path) 
+
+
+
+# Assuming 'deg' is a DESeq2 results dataframe for differentially expressed genes with gene names as row names 
+
+# Prepare the ranked list of genes from the DEG list 
+
+ranked_genes_deg <- deg$log2FoldChange 
+
+names(ranked_genes_deg) <- row.names(deg) 
+
+
+
+# Define the list of pathways you are interested in 
+
+pathways_of_interest <- c("HALLMARK_P53_PATHWAY", "HALLMARK_APOPTOSIS", "HALLMARK_DNA_REPAIR","HALLMARK_INFLAMMATORY_RESPONSE") 
+
+
+
+# Loop through each pathway and generate plots 
+
+for(pathway_id in pathways_of_interest) { 
+  
+  # Filter for genes in the current pathway using the DEG list 
+  
+  pathway_genes <- unname(unlist(gene_sets[[pathway_id]])) 
+  
+  ranked_pathway_genes <- ranked_genes_deg[names(ranked_genes_deg) %in% pathway_genes] 
+  
+  
+  
+  # Check if there are any genes in common 
+  
+  if (length(ranked_pathway_genes) == 0) { 
+    
+    next  # Skip to next pathway if no genes are found 
+    
+  } 
+  
+  
+  
+  # Proceed to create the dataframe for plotting 
+  
+  pathway_genes_df <- data.frame(Gene = names(ranked_pathway_genes), log2FoldChange = ranked_pathway_genes) 
+  
+  
+  
+  # Sort by absolute log2FoldChange to get top genes 
+  
+  pathway_genes_df <- pathway_genes_df[order(-abs(pathway_genes_df$log2FoldChange)), ] 
+  
+  
+  
+  # Take top genes by absolute value for plotting 
+  
+  top_genes <- head(pathway_genes_df, 40) 
+  
+  
+  
+  # Create the enrichment plot for top genes 
+  
+  enrichment_plot <- ggplot(top_genes, aes(x = reorder(Gene, log2FoldChange), y = log2FoldChange)) + 
+    
+    geom_bar(stat = "identity", aes(fill = log2FoldChange > 0)) + 
+    
+    scale_fill_manual(values = c("blue", "red")) + 
+    
+    coord_flip() + 
+    
+    labs(title = paste("Top 40 DEGs for", gsub("HALLMARK_", "", pathway_id)), 
+         
+         x = "Genes", 
+         
+         y = "log2 Fold Change") + 
+    
+    theme_minimal() 
+  
+  
+  
+  # Save the plot as a file 
+  
+  plot_filename <- paste0(save_dir, "Top40_DEGs_", gsub("HALLMARK_", "", pathway_id), "_Enrichment_Plot.pdf") 
+  
+  ggsave(filename = plot_filename, plot = enrichment_plot, width = 8, height = 6) 
+  
+  
+  
+  # Print out the plot in the console 
+  
+  print(enrichment_plot) 
+  
+} 
+
+
+
+# Adding NES , adj p value# Assuming 'fgsea_results' contains the results from fgseaMultilevel 
+
+# and 'pathways_of_interest' is your list of specific pathways 
+
+
+
+for (pathway_id in pathways_of_interest) { 
+  
+  # Check if the pathway exists in your gene set and in fgsea results 
+  
+  if (!pathway_id %in% names(gene_sets) || !pathway_id %in% fgsea_results$pathway) { 
+    
+    next  # Skip if the pathway is not found 
+    
+  } 
+  
+  
+  
+  # Generate the enrichment plot for the pathway 
+  
+  enrichment_plot <- fgsea::plotEnrichment(gene_sets[[pathway_id]], stats = finite_genes) + 
+    
+    ggtitle(paste("Enrichment plot for", pathway_id)) 
+  
+  
+  
+  # Save the plot as a file 
+  
+  plot_filename <- paste0(save_dir, "Enrichment_Plot_", gsub("HALLMARK_", "", pathway_id), ".pdf") 
+  
+  ggsave(filename = plot_filename, plot = enrichment_plot, width = 8, height = 6) 
+  
+  
+  
+  # Extract the relevant statistics for the pathway 
+  
+  pathway_stats <- fgsea_results[fgsea_results$pathway == pathway_id, c("pathway", "NES", "padj", "pval")] 
+  
+  
+  
+  # Save the statistics as a CSV file 
+  
+  stats_filename <- paste0(save_dir, "Enrichment_Stats_", gsub("HALLMARK_", "", pathway_id), ".csv") 
+  
+  write.csv(pathway_stats, file = stats_filename, row.names = FALSE) 
+  
+  
+  
+  # Print out the plot 
+  
+  print(enrichment_plot) 
+  
+} 
+
